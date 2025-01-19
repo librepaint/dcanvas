@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+import 'dart:math' as Math;
 import './CanvasPattern.dart';
 import './utils.dart';
 import './Canvas.dart';
@@ -16,6 +18,13 @@ class DOMPoint {
     String toString() {
         return "DOMPoint($x, $y)";
     }
+}
+
+class ImageData {
+    late Uint8List data;
+    late int width;
+    late int height;
+    ImageData(this.data, this.width, this.height);
 }
 
 sealed class FillInfo {}
@@ -114,12 +123,6 @@ class CanvasState {
 }
 
 const f64Width = 8 /*ffi.sizeOf<ffi.Double>()*/; // set to literal for micro optimization
-ffi.Pointer<ffi.Int32> mallocInt() {
-    return malloc<ffi.Int32>();
-}
-ffi.Pointer<ffi.Double> mallocDouble() {
-    return malloc<ffi.Double>();
-}
 
 /*
  * Create temporary surface for gradient or pattern transparency
@@ -155,6 +158,7 @@ ffi.Pointer<cairo_pattern_t> create_transparent_gradient(ffi.Pointer<cairo_patte
         cairo.cairo_pattern_get_color_stop_rgba(source, i, offset, r, g, b, a);
         cairo.cairo_pattern_add_color_stop_rgba(newGradient, offset.value, r.value, g.value, b.value, a.value * alpha);
     }
+    malloc.free(chunk);
     return newGradient;
 }
 
@@ -293,9 +297,10 @@ double get_text_scale(ffi.Pointer<PangoLayout> layout, double maxWidth) {
     ffi.Pointer<PangoRectangle> logical_rect = malloc<PangoRectangle>();
     pango.pango_layout_get_pixel_extents(layout, ffi.nullptr, logical_rect);
 
-    final logicalRect = logical_rect.ref;
-    if (logicalRect.width > maxWidth) {
-        return maxWidth / logicalRect.width;
+    final logicalRectWidth = logical_rect.ref.width;
+    malloc.free(logical_rect);
+    if (logicalRectWidth > maxWidth) {
+        return maxWidth / logicalRectWidth;
     } else {
         return 1.0;
     }
@@ -313,6 +318,7 @@ double getBaselineAdjustment(ffi.Pointer<PangoLayout> layout, int baseline) {
     double ascent = scale * pango.pango_layout_get_baseline(layout);
     double descent = scale * logical_rect.ref.height - ascent;
 
+    malloc.free(logical_rect);
     switch (baseline) {
         case TextBaseline.TEXT_BASELINE_ALPHABETIC:
             return ascent;
@@ -325,16 +331,32 @@ double getBaselineAdjustment(ffi.Pointer<PangoLayout> layout, int baseline) {
     }
 }
 
-ffi.Pointer<ffi.Pointer<cairo_surface_t>> cairoSurfacePtrPtr(ffi.Pointer<cairo_surface_t> surface) {
-    final ptr = malloc<ffi.Pointer<cairo_surface_t>>();
-    ptr.value = surface;
-    return ptr;
+/*
+ * Take a transform matrix and return its components
+ * 0: angle, 1: scaleX, 2: scaleY, 3: skewX, 4: translateX, 5: translateY
+ */
+void decompose_matrix(cairo_matrix_t matrix, List<double> destination) {
+    double denom = (Math.pow(matrix.xx, 2) + Math.pow(matrix.yx, 2)).toDouble();
+    destination[0] = Math.atan2(matrix.yx, matrix.xx);
+    destination[1] = Math.sqrt(denom);
+    destination[2] = (matrix.xx * matrix.yy - matrix.xy * matrix.yx) / destination[1];
+    destination[3] = Math.atan2(matrix.xx * matrix.xy + matrix.yx * matrix.yy, denom);
+    destination[4] = matrix.x0;
+    destination[5] = matrix.y0;
 }
 
 void memset(ffi.Pointer<ffi.Void> arr, int val, int size) {
     var bytes = arr.cast<ffi.Uint8>();
     for (int i = 0; i < size; i++) {
         bytes[i] = val;
+    }
+}
+
+void memcpy(ffi.Pointer<ffi.Void> arr, ffi.Pointer<ffi.Void> srcPtr, int size) {
+    var dest = arr.cast<ffi.Uint8>();
+    var src = srcPtr.cast<ffi.Uint8>();
+    for (int i = 0; i < size; i++) {
+        dest[i] = src[i];
     }
 }
 
@@ -408,6 +430,14 @@ class Context2D {
         states.push(CanvasState());
         state = states.top();
         pango.pango_layout_set_font_description(_layout, state.fontDescription);
+    }
+
+    /*
+    * Destroy cairo context.
+    */
+    void free() {
+        if (_layout != ffi.nullptr) malloc.free(_layout);
+        if (_context != ffi.nullptr) cairo.cairo_destroy(_context);
     }
 
     /*
@@ -594,6 +624,8 @@ class Context2D {
             cairo.cairo_paint(_context);
             cairo.cairo_destroy(shadow_context);
             cairo.cairo_surface_destroy(shadow_surface);
+
+            malloc.free(chunk);
         } else {
             // Offset first, then apply path's transform
             cairo.cairo_translate(
@@ -651,7 +683,9 @@ class Context2D {
                 ffi.Pointer<cairo_path_t> savedPath = cairo.cairo_copy_path(_context);
                 ffi.Pointer<cairo_surface_t> patternSurface = ffi.nullptr;
                 
-                cairo.cairo_pattern_get_surface(cairo.cairo_get_source(_context), cairoSurfacePtrPtr(patternSurface));
+                final cairoSurfacePtrPtr = malloc<ffi.Pointer<cairo_surface_t>>();
+                cairoSurfacePtrPtr.value = patternSurface;
+                cairo.cairo_pattern_get_surface(cairo.cairo_get_source(_context), cairoSurfacePtrPtr);
 
                 final chunk = malloc.allocate(2 * f64Width);
                 final CA = chunk.address;
@@ -677,6 +711,8 @@ class Context2D {
                 cairo.cairo_path_destroy(savedPath);
                 cairo.cairo_pattern_set_extend(cairo.cairo_get_source(_context), cairo_extend.CAIRO_EXTEND_REPEAT);
                 needsRestore = true;
+                malloc.free(chunk);
+                malloc.free(cairoSurfacePtrPtr);
             }
         } else if (state.fillGradient != ffi.nullptr) {
             if (state.globalAlpha < 1) {
@@ -1075,6 +1111,8 @@ class Context2D {
             x2 + 2.0 / 3.0 * (x1 - x2), y2 + 2.0 / 3.0 * (y1 - y2), 
             x2, y2
         );
+
+        malloc.free(chunk);
     }
 
     /*
@@ -1254,6 +1292,13 @@ class Context2D {
     }
 
     /*
+    * Reset the CTM, used internally by setTransform().
+    */
+    void resetTransform() {
+        cairo.cairo_identity_matrix(_context);
+    }
+
+    /*
     * Scale transformation.
     */
     void scale(num xs, num ys) {
@@ -1364,6 +1409,8 @@ class Context2D {
         } else if (state.textDrawingMode == CanvasDrawMode.TEXT_DRAW_GLYPHS) {
             pango.pango_cairo_show_layout(_context.cast(), _layout);
         }
+        
+        malloc.free(logical_rect);
     }
 
     void paintText(bool stroke, String text, double x, double y, [num? maxWidth]) {
@@ -1488,6 +1535,579 @@ class Context2D {
 
         pango.pango_font_metrics_unref(metrics);
 
+        malloc.free(_ink_rect);
+        malloc.free(_logical_rect);
+
         return obj;
+    }
+
+    /*
+    * Get image data.
+    *
+    *  - sx, sy, sw, sh
+    *
+    */
+    ImageData getImageData(num sx_, num sy_, num sw_, num sh_) {
+        Canvas canvas = this.canvas;
+
+        int sx = sx_.toInt();
+        int sy = sy_.toInt();
+        int sw = sw_.toInt();
+        int sh = sh_.toInt();
+
+        if (sw == 0) {
+            throw "IndexSizeError: The source width is 0.";
+        }
+        if (sh == 0) {
+            throw "IndexSizeError: The source height is 0.";
+        }
+
+        int width = canvas.getWidth();
+        int height = canvas.getHeight();
+
+        if (width == 0) {
+            throw "Canvas width is 0";
+        }
+        if (height == 0) {
+            throw "Canvas height is 0";
+        }
+
+        // WebKit and Firefox have this behavior:
+        // Flip the coordinates so the origin is top/left-most:
+        if (sw < 0) {
+            sx += sw;
+            sw = -sw;
+        }
+        if (sh < 0) {
+            sy += sh;
+            sh = -sh;
+        }
+
+        if (sx + sw > width) sw = width - sx;
+        if (sy + sh > height) sh = height - sy;
+
+        // WebKit/moz functionality. node-canvas used to return in either case.
+        if (sw <= 0) sw = 1;
+        if (sh <= 0) sh = 1;
+
+        // Non-compliant. "Pixels outside the canvas must be returned as transparent
+        // black." This instead clips the returned array to the canvas area.
+        if (sx < 0) {
+            sw += sx;
+            sx = 0;
+        }
+        if (sy < 0) {
+            sh += sy;
+            sy = 0;
+        }
+
+        int srcStride = canvas.stride();
+        int bpp = (srcStride / width).toInt();
+        int size = sw * sh * bpp;
+        int dstStride = sw * bpp;
+
+        ffi.Pointer<ffi.Uint8> src = canvas.data();
+
+        Uint8List dataArray = Uint8List(size);
+        int dst = 0;
+
+        switch (canvas.backend().format) {
+            case cairo_format.CAIRO_FORMAT_ARGB32: {
+                // Rearrange alpha (argb -> rgba), undo alpha pre-multiplication,
+                // and store in big-endian format
+                for (int y = 0; y < sh; ++y) {
+                    ffi.Pointer<ffi.Uint32> row = src.cast<ffi.Uint32>() + srcStride * (y + sy);
+                    for (int x = 0; x < sw; ++x) {
+                        int bx = x * 4;
+                        ffi.Pointer<ffi.Uint32> pixel = row + x + sx;
+                        int a = ffi.Pointer.fromAddress(pixel.address).cast<ffi.Uint8>().value >> 24;
+                        int r = ffi.Pointer.fromAddress(pixel.address).cast<ffi.Uint8>().value >> 16;
+                        int g = ffi.Pointer.fromAddress(pixel.address).cast<ffi.Uint8>().value >> 8;
+                        int b = pixel.cast<ffi.Uint8>().value;
+                        dataArray[dst + bx + 3] = a;
+
+                        // Performance optimization: fully transparent/opaque pixels can be
+                        // processed more efficiently.
+                        if (a == 0 || a == 255) {
+                            dataArray[dst + bx + 0] = r;
+                            dataArray[dst + bx + 1] = g;
+                            dataArray[dst + bx + 2] = b;
+                        } else {
+                            // Undo alpha pre-multiplication
+                            double alphaR = 255 / a;
+                            dataArray[dst + bx + 0] = (r * alphaR).toInt();
+                            dataArray[dst + bx + 1] = (g * alphaR).toInt();
+                            dataArray[dst + bx + 2] = (b * alphaR).toInt();
+                        }
+
+                    }
+                    dst += dstStride;
+                }
+                break;
+            }
+            case cairo_format.CAIRO_FORMAT_RGB24: {
+                // Rearrange alpha (argb -> rgba) and store in big-endian format
+                for (int y = 0; y < sh; ++y) {
+                    ffi.Pointer<ffi.Uint32> row = ffi.Pointer.fromAddress(src.address + srcStride * (y + sy));
+                    for (int x = 0; x < sw; ++x) {
+                        int bx = x * 4;
+                        ffi.Pointer<ffi.Uint32> pixel = row + x + sx;
+                        int r = ffi.Pointer.fromAddress(pixel.address >> 16).cast<ffi.Uint8>().value;
+                        int g = ffi.Pointer.fromAddress(pixel.address >> 8).cast<ffi.Uint8>().value;
+                        int b = pixel.cast<ffi.Uint8>().value;
+
+                        dataArray[dst + bx + 0] = r;
+                        dataArray[dst + bx + 1] = g;
+                        dataArray[dst + bx + 2] = b;
+                        dataArray[dst + bx + 3] = 255;
+                    }
+                    dst += dstStride;
+                }
+                break;
+            }
+            case cairo_format.CAIRO_FORMAT_A8: {
+                for (int y = 0; y < sh; ++y) {
+                    ffi.Pointer<ffi.Uint8> row = src + srcStride * (y + sy);
+                    for (int i = 0; i < dstStride; i++) {
+                        dataArray[dst] = (row + sx).value;
+                    }
+                    dst += dstStride;
+                }
+                break;
+            }
+            case cairo_format.CAIRO_FORMAT_A1: {
+                // TODO Should this be totally packed, or maintain a stride divisible by 4?
+                throw "getImageData for CANVAS_FORMAT_A1 is not yet implemented";
+            }
+            case cairo_format.CAIRO_FORMAT_RGB16_565: {
+                for (int y = 0; y < sh; ++y) {
+                    ffi.Pointer<ffi.Uint16> row = (src.cast<ffi.Uint16>() + srcStride * (y + sy));
+                    for (int i = 0; i < dstStride; i++) {
+                        dataArray[dst] = (row + sx + i).value;
+                    }
+                    dst += dstStride;
+                }
+            }
+            default: {
+                // Unlikely
+                throw "Invalid pixel format or not an image canvas";
+            }
+        }
+
+        return ImageData(dataArray, sw, sh);
+    }
+
+    /*
+    * Put image data.
+    *
+    *  - imageData, dx, dy
+    *  - imageData, dx, dy, sx, sy, sw, sh
+    *
+    */
+    void putImageData(ImageData imageData, num dx_, num dy_, [num? dirtyX, num? dirtyY, num? dirtyWidth, num? dirtyHeight]) {
+        var src = imageData.data;
+        var dst = this.canvas.data();
+
+        int dstStride = this.canvas.stride();
+        int Bpp = (dstStride / this.canvas.getWidth()).toInt();
+        int srcStride = (Bpp * imageData.width).toInt();
+
+        int sx = 0, 
+            sy = 0, 
+            sw = 0, 
+            sh = 0, 
+            dx = dx_.toInt(), 
+            dy = dy_.toInt(), 
+            rows, 
+            cols;
+
+        if (dirtyX == null) {
+            // imageData, dx, dy
+            sw = imageData.width;
+            sh = imageData.height;
+        } else {
+            // imageData, dx, dy, sx, sy, sw, sh
+
+            if (dirtyX == null || dirtyY == null || dirtyWidth == null || dirtyHeight == null) {
+                throw "invalid arguments";
+            }
+
+            sx = dirtyX.toInt();
+            sy = dirtyY.toInt();
+            sw = dirtyWidth.toInt();
+            sh = dirtyHeight.toInt();
+            // fix up negative height, width
+            if (sw < 0) {
+                sx += sw;
+                sw = -sw;
+            }
+            if (sh < 0) {
+                sy += sh;
+                sh = -sh;
+            }
+            // clamp the left edge
+            if (sx < 0) {
+                sw += sx;
+                sx = 0;
+            }
+            if (sy < 0) {
+                sh += sy;
+                sy = 0;
+            }
+            // clamp the right edge
+            if (sx + sw > imageData.width) sw = imageData.width - sx;
+            if (sy + sh > imageData.height) sh = imageData.height - sy;
+            // start destination at source offset
+            dx += sx;
+            dy += sy;
+        }
+
+        // chop off outlying source data
+        if (dx < 0) {
+            sw += dx;
+            sx -= dx;
+            dx = 0;
+        }
+        if (dy < 0) {
+            sh += dy;
+            sy -= dy;
+            dy = 0;
+        }
+        // clamp width at canvas size
+        // Need to wrap std::min calls using parens to prevent macro expansion on
+        // windows. See http://stackoverflow.com/questions/5004858/stdmin-gives-error
+        cols = Math.min(sw, this.canvas.getWidth() - dx);
+        rows = Math.min(sh, this.canvas.getHeight() - dy);
+
+        if (cols <= 0 || rows <= 0) return;
+
+        int srcIdx = 0;
+        int dstIdx = 0;
+
+        switch (this.canvas.backend().format) {
+            case cairo_format.CAIRO_FORMAT_ARGB32: {
+                srcIdx += sy * srcStride + sx * 4;
+                dstIdx += dstStride * dy + 4 * dx;
+                for (int y = 0; y < rows; ++y) {
+                    int dstRowIdx = dstIdx;
+                    int srcRowIdx = srcIdx;
+                    for (int x = 0; x < cols; ++x) {
+                        // rgba
+                        int r = src[srcRowIdx++];
+                        int g = src[srcRowIdx++];
+                        int b = src[srcRowIdx++];
+                        int a = src[srcRowIdx++];
+
+                        // argb
+                        // performance optimization: fully transparent/opaque pixels can be
+                        // processed more efficiently.
+                        if (a == 0) {
+                            dst[dstRowIdx++] = 0;
+                            dst[dstRowIdx++] = 0;
+                            dst[dstRowIdx++] = 0;
+                            dst[dstRowIdx++] = 0;
+                        } else if (a == 255) {
+                            dst[dstRowIdx++] = b;
+                            dst[dstRowIdx++] = g;
+                            dst[dstRowIdx++] = r;
+                            dst[dstRowIdx++] = a;
+                        } else {
+                            double alpha = a / 255;
+                            dst[dstRowIdx++] = (b * alpha).toInt();
+                            dst[dstRowIdx++] = (g * alpha).toInt();
+                            dst[dstRowIdx++] = (r * alpha).toInt();
+                            dst[dstRowIdx++] = a;
+                        }
+                    }
+                    dstIdx += dstStride;
+                    srcIdx += srcStride;
+                }
+                break;
+            }
+            case cairo_format.CAIRO_FORMAT_RGB24: {
+                srcIdx += sy * srcStride + sx * 4;
+                dstIdx += dstStride * dy + 4 * dx;
+                for (int y = 0; y < rows; ++y) {
+                    int dstRowIdx = dstIdx;
+                    int srcRowIdx = srcIdx;
+                    for (int x = 0; x < cols; ++x) {
+                        // rgba
+                        int r = src[srcRowIdx++];
+                        int g = src[srcRowIdx++];
+                        int b = src[srcRowIdx++];
+                        srcRowIdx++;
+
+                        // argb
+                        dst[dstRowIdx++] = b;
+                        dst[dstRowIdx++] = g;
+                        dst[dstRowIdx++] = r;
+                        dst[dstRowIdx++] = 255;
+                    }
+                    dstIdx += dstStride;
+                    srcIdx += srcStride;
+                }
+                break;
+            }
+            case cairo_format.CAIRO_FORMAT_A8: {
+                srcIdx += sy * srcStride + sx;
+                dstIdx += dstStride * dy + dx;
+                if (srcStride == dstStride && cols == dstStride) {
+                    // fast path: strides are the same and doing a full-width put
+                    for (int i = 0; i < cols * rows; i++) {
+                        dst[dstIdx + i] = src[srcIdx + i];
+                    }
+                } else {
+                    for (int y = 0; y < rows; ++y) {
+                        for (int i = 0; i < cols; i++) {
+                            dst[dstIdx + i] = src[srcIdx + i];
+                        }
+                        dstIdx += dstStride;
+                        srcIdx += srcStride;
+                    }
+                }
+                break;
+            }
+            case cairo_format.CAIRO_FORMAT_A1: {
+                // TODO Should this be totally packed, or maintain a stride divisible by 4?
+                throw "putImageData for CANVAS_FORMAT_A1 is not yet implemented";
+            }
+            case cairo_format.CAIRO_FORMAT_RGB16_565: {
+                srcIdx += sy * srcStride + sx * 2;
+                dstIdx += dstStride * dy + 2 * dx;
+                for (int y = 0; y < rows; ++y) {
+                    for (int i = 0; i < cols * 2; i++) {
+                        dst[dstIdx + i] = src[srcIdx + i];
+                    }
+                    dstIdx += dstStride;
+                    srcIdx += srcStride;
+                }
+                break;
+            }
+            default: {
+                throw "Invalid pixel format or not an image canvas";
+            }
+        }
+
+        cairo.cairo_surface_mark_dirty_rectangle(
+            this.canvas.surface(), 
+            dx, dy, 
+            cols, rows
+        );
+    }
+
+    /*
+    * Draw image src image to the destination (context).
+    *
+    *  - dx, dy
+    *  - dx, dy, dw, dh
+    *  - sx, sy, sw, sh, dx, dy, dw, dh
+    *
+    */
+    void drawImage(Canvas image, num a, num b, [num? c, num? d, num? e, num? f, num? g, num? h]) {
+        double sx = 0,
+            sy = 0,
+            sw = 0, 
+            sh = 0, 
+            dx = 0, 
+            dy = 0, 
+            dw = 0, 
+            dh = 0;
+        double source_w = 0;
+        double source_h = 0;
+
+        ffi.Pointer<cairo_surface_t> surface;
+
+        // TODO: Implement Images
+        // Image
+        // if (image is Image) {
+        //     Image *img = Image::Unwrap(obj);
+        //     if (!img->isComplete()) {
+        //         Napi::Error::New(env, "Image given has not completed loading").ThrowAsJavaScriptException();
+        //         return;
+        //     }
+        //     source_w = sw = img->width;
+        //     source_h = sh = img->height;
+        //     surface = img->surface();
+        // } 
+
+        // Canvas
+        if (image is Canvas) {
+            Canvas canvas = image;
+            source_w = sw = canvas.getWidth().toDouble();
+            source_h = sh = canvas.getHeight().toDouble();
+            surface = canvas.surface();
+
+        // Invalid
+        } else {
+            throw "Image or Canvas expected";
+        }
+
+        ffi.Pointer<cairo_t> ctx = _context;
+
+        // Arguments
+        if (h != null) {
+            // img, sx, sy, sw, sh, dx, dy, dw, dh
+            if (c == null || d == null || e == null || f == null || g == null) {
+                return;
+            }
+
+            sx = a.toDouble();
+            sy = b.toDouble();
+            sw = c.toDouble();
+            sh = d.toDouble();
+            dx = e.toDouble();
+            dy = f.toDouble();
+            dw = g.toDouble();
+            dh = h.toDouble();
+        }
+        if (d != null) {
+            // img, dx, dy, dw, dh
+            if (c == null) {
+                return;
+            }
+
+            dx = a.toDouble();
+            dy = b.toDouble();
+            dw = c.toDouble();
+            dh = d.toDouble();
+        } else {
+            dx = a.toDouble();
+            dy = b.toDouble();
+            dw = sw;
+            dh = sh;
+        }
+        
+        if (sw == 0 || sh == 0 || dw == 0 || dh == 0)
+            return;
+
+        // Start draw
+        cairo.cairo_save(ctx);
+
+        ffi.Pointer<cairo_matrix_t> matrix = malloc();
+        List<double> transforms = [0, 0, 0, 0, 0, 0];
+        cairo.cairo_get_matrix(ctx, matrix);
+        decompose_matrix(matrix.ref, transforms);
+        malloc.free(matrix);
+        // extract the scale value from the current transform so that we know how many pixels we
+        // need for our extra canvas in the drawImage operation.
+        double current_scale_x = transforms[1].abs();
+        double current_scale_y = transforms[2].abs();
+        double extra_dx = 0;
+        double extra_dy = 0;
+        double fx = dw / sw * current_scale_x; // transforms[1] is scale on X
+        double fy = dh / sh * current_scale_y; // transforms[2] is scale on X
+        bool needScale = dw != sw || dh != sh;
+        bool needCut = sw != source_w || sh != source_h || sx < 0 || sy < 0;
+        bool sameCanvas = surface == this.canvas.surface();
+        bool needsExtraSurface = sameCanvas || needCut || needScale;
+        ffi.Pointer<cairo_surface_t> surfTemp = ffi.nullptr;
+        ffi.Pointer<cairo_t> ctxTemp = ffi.nullptr;
+
+        if (needsExtraSurface) {
+            // we want to create the extra surface as small as possible.
+            // fx and fy are the total scaling we need to apply to sw, sh.
+            // from sw and sh we want to remove the part that is outside the source_w and soruce_h
+            double real_w = sw;
+            double real_h = sh;
+            double translate_x = 0;
+            double translate_y = 0;
+            // if sx or sy are negative, a part of the area represented by sw and sh is empty
+            // because there are empty pixels, so we cut it out.
+            // On the other hand if sx or sy are positive, but sw and sh extend outside the real
+            // source pixels, we cut the area in that case too.
+            if (sx < 0) {
+                extra_dx = -sx * fx;
+                real_w = sw + sx;
+            } else if (sx + sw > source_w) {
+                real_w = sw - (sx + sw - source_w);
+            }
+            if (sy < 0) {
+                extra_dy = -sy * fy;
+                real_h = sh + sy;
+            } else if (sy + sh > source_h) {
+                real_h = sh - (sy + sh - source_h);
+            }
+            // if after cutting we are still bigger than source pixels, we restrict again
+            if (real_w > source_w) {
+                real_w = source_w;
+            }
+            if (real_h > source_h) {
+                real_h = source_h;
+            }
+            // TODO: find a way to limit the surfTemp to real_w and real_h if fx and fy are bigger than 1.
+            // there are no more pixel than the one available in the source, no need to create a bigger surface.
+            surfTemp = cairo.cairo_image_surface_create(cairo_format.CAIRO_FORMAT_ARGB32, (real_w * fx).round(), (real_h * fy).round());
+            ctxTemp = cairo.cairo_create(surfTemp);
+            cairo.cairo_scale(ctxTemp, fx, fy);
+            if (sx > 0) {
+                translate_x = sx;
+            }
+            if (sy > 0) {
+                translate_y = sy;
+            }
+            cairo.cairo_set_source_surface(ctxTemp, surface, -translate_x, -translate_y);
+            cairo.cairo_pattern_set_filter(cairo.cairo_get_source(ctxTemp), state.imageSmoothingEnabled ? state.patternQuality : cairo_filter.CAIRO_FILTER_NEAREST);
+            cairo.cairo_pattern_set_extend(cairo.cairo_get_source(ctxTemp), cairo_extend.CAIRO_EXTEND_REFLECT);
+            cairo.cairo_paint_with_alpha(ctxTemp, 1);
+            surface = surfTemp;
+        }
+        // apply shadow if there is one
+        if (hasShadow()) {
+            if (state.shadowBlur != 0) {
+                // we need to create a new surface in order to blur
+                int pad = state.shadowBlur * 2;
+                ffi.Pointer<cairo_surface_t> shadow_surface = cairo.cairo_image_surface_create(cairo_format.CAIRO_FORMAT_ARGB32, (dw + 2 * pad).toInt(), (dh + 2 * pad).toInt());
+                ffi.Pointer<cairo_t> shadow_context = cairo.cairo_create(shadow_surface);
+
+                // mask and blur
+                setCtxSourceRGBA(shadow_context, state.shadow);
+                cairo.cairo_mask_surface(shadow_context, surface, pad.toDouble(), pad.toDouble());
+                blur(shadow_surface, state.shadowBlur);
+
+                // paint
+                // @note: ShadowBlur looks different in each browser. This implementation matches chrome as close as possible.
+                //        The 1.4 offset comes from visual tests with Chrome. I have read the spec and part of the shadowBlur
+                //        implementation, and its not immediately clear why an offset is necessary, but without it, the result
+                //        in chrome is different.
+                cairo.cairo_set_source_surface(
+                    ctx, shadow_surface,
+                    dx + state.shadowOffsetX - pad + 1.4,
+                    dy + state.shadowOffsetY - pad + 1.4
+                );
+                cairo.cairo_paint(ctx);
+                // cleanup
+                cairo.cairo_destroy(shadow_context);
+                cairo.cairo_surface_destroy(shadow_surface);
+            } else {
+                setSourceRGBA(state.shadow);
+                cairo.cairo_mask_surface(
+                    ctx, surface,
+                    dx + (state.shadowOffsetX),
+                    dy + (state.shadowOffsetY)
+                );
+            }
+        }
+
+        double scaled_dx = dx;
+        double scaled_dy = dy;
+
+        if (needsExtraSurface && (current_scale_x != 1 || current_scale_y != 1)) {
+            // in this case our surface contains already current_scale_x, we need to scale back
+            cairo.cairo_scale(ctx, 1 / current_scale_x, 1 / current_scale_y);
+            scaled_dx *= current_scale_x;
+            scaled_dy *= current_scale_y;
+        }
+        // Paint
+        cairo.cairo_set_source_surface(ctx, surface, scaled_dx + extra_dx, scaled_dy + extra_dy);
+        cairo.cairo_pattern_set_filter(cairo.cairo_get_source(ctx), state.imageSmoothingEnabled ? state.patternQuality : cairo_filter.CAIRO_FILTER_NEAREST);
+        cairo.cairo_pattern_set_extend(cairo.cairo_get_source(ctx), cairo_extend.CAIRO_EXTEND_NONE);
+        cairo.cairo_paint_with_alpha(ctx, state.globalAlpha);
+
+        cairo.cairo_restore(ctx);
+
+        if (needsExtraSurface) {
+            cairo.cairo_destroy(ctxTemp);
+            cairo.cairo_surface_destroy(surfTemp);
+        }
     }
 }

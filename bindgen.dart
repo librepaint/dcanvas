@@ -73,6 +73,7 @@ headers:
     - '/usr/include/SDL2/SDL_render.h'
     - '/usr/include/SDL2/SDL_surface.h'
     - '/usr/include/SDL2/SDL_events.h'
+    - '/usr/include/SDL2/SDL_mouse.h'
 
 llvm-path:
   - '/usr/lib/llvm-18'

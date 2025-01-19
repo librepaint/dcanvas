@@ -62,7 +62,7 @@ class Canvas {
     ffi.Pointer<cairo_surface_t> surface(){ return _backend!.getSurface(); }
 
 
-    // uint8_t *data(){ return cairo_image_surface_get_data(surface()); }
+    ffi.Pointer<ffi.Uint8> data(){ return cairo.cairo_image_surface_get_data(surface()).cast(); }
     int stride(){ return cairo.cairo_image_surface_get_stride(surface()); }
     int nBytes(){
       return _backend!.height * stride();

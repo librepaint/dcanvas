@@ -6,20 +6,49 @@ import 'package:ffi/ffi.dart';
 export './Backend.dart'
     show SDL_INIT_EVERYTHING, SDL_WindowFlags;
 
-enum EventTypes {
+enum EventType {
     Quit,
     KeyDown,
+    KeyUp,
+    MouseDown,
+    MouseUp,
+    MouseMove,
     Unknown
 }
 
-class Event {
-    late EventTypes which;
-    late int data;
-    Event({
-        required this.which,
-        required this.data
-    });
+class Event {}
+
+class MouseEvent extends Event {
+    late EventType type;
+    late int which;
+    late int clientX;
+    late int clientY;
+    MouseEvent({
+        required EventType type,
+        int which=-1,
+        int clientX=-1,
+        int clientY=-1,
+    }) {
+        this.type = type;
+        this.which = which;
+        this.clientX = clientX;
+        this.clientY = clientY;
+    }
 }
+
+class KeyboardEvent extends Event {
+    late EventType type;
+    late int keyCode;
+    KeyboardEvent({
+        required EventType type,
+        int keyCode=-1,
+    }) {
+        this.type = type;
+        this.keyCode = keyCode;
+    }
+}
+
+class QuitEvent extends Event {}
 
 class Key {
     static final int Escape = 27;
@@ -42,6 +71,14 @@ class SDLWindow {
         int height = 400,
         List<SDL_WindowFlags>? flagsList
     }) {
+        if (SDL_BUTTON_LEFT != 1) {
+            throw "SDL_BUTTON_LEFT is an unexpected value";
+        } else if (SDL_BUTTON_MIDDLE != 2) {
+            throw "SDL_BUTTON_MIDDLE is an unexpected value";
+        } else if (SDL_BUTTON_RIGHT != 3) {
+            throw "SDL_BUTTON_RIGHT is an unexpected value";
+        }
+
         int flags = SDL_WindowFlags.SDL_WINDOW_SHOWN.value;
         if (flagsList != null) {
             for (var i = 0; i < flagsList.length; i++) {
@@ -147,23 +184,42 @@ class SDLWindow {
             isPendingEvent = sdl.SDL_PollEvent(eventPtr) == 1;
             final event = eventPtr.ref;
 
-            var dcanvasEvent;
+            Event dcanvasEvent;
             switch (SDL_EventType.fromValue(event.type)) {
                 case SDL_EventType.SDL_KEYDOWN:
-                    dcanvasEvent = Event(
-                        which: EventTypes.KeyDown,
-                        data: event.key.keysym.sym
+                    dcanvasEvent = KeyboardEvent(
+                        type: EventType.KeyDown,
+                        keyCode: event.key.keysym.sym
+                    );
+                case SDL_EventType.SDL_KEYUP:
+                    dcanvasEvent = KeyboardEvent(
+                        type: EventType.KeyUp,
+                        keyCode: event.key.keysym.sym
+                    );
+                case SDL_EventType.SDL_MOUSEBUTTONDOWN:
+                    dcanvasEvent = MouseEvent(
+                        type: EventType.MouseDown,
+                        which: event.button.button,
+                        clientX: event.button.x,
+                        clientY: event.button.y
+                    );
+                case SDL_EventType.SDL_MOUSEBUTTONUP:
+                    dcanvasEvent = MouseEvent(
+                        type: EventType.MouseUp,
+                        which: event.button.button,
+                        clientX: event.button.x,
+                        clientY: event.button.y
+                    );
+                case SDL_EventType.SDL_MOUSEMOTION:
+                    dcanvasEvent = MouseEvent(
+                        type: EventType.MouseMove,
+                        clientX: event.button.x,
+                        clientY: event.button.y
                     );
                 case SDL_EventType.SDL_QUIT:
-                    dcanvasEvent = Event(
-                        which: EventTypes.Quit,
-                        data: 0
-                    );
+                    dcanvasEvent = QuitEvent();
                 default:
-                    dcanvasEvent = Event(
-                        which: EventTypes.Unknown,
-                        data: 0
-                    );
+                    dcanvasEvent = Event();
             };
 
             final eventHandler = this.eventHandler;

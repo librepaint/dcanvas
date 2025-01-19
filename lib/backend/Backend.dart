@@ -17,7 +17,7 @@ export './pango/pango.dart'
 import './sdl/sdl.dart' as SDLBindings;
 export './sdl/sdl.dart'
     show SDL_Window, SDL_Renderer, SDL_Surface, SDL_WINDOWPOS_UNDEFINED, SDL_WindowFlags,
-    SDL_RendererFlags, SDL_EventType, SDL_Event, SDL_INIT_EVERYTHING;
+    SDL_RendererFlags, SDL_EventType, SDL_Event, SDL_INIT_EVERYTHING, SDL_BUTTON_LEFT, SDL_BUTTON_MIDDLE, SDL_BUTTON_RIGHT;
 
 typedef cairo_status = CairoBindings.cairo_status1;
 typedef cairo_pattern_type_t = int;

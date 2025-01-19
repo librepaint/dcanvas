@@ -1,7 +1,7 @@
 name: dcanvas
 description: Cairo backed Canvas implementation in Dart
 version: 0.0.1
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/librepaint/dcanvas
 
 environment:
   sdk: ^3.6.0
