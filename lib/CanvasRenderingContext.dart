@@ -1616,14 +1616,14 @@ class Context2D {
                 // Rearrange alpha (argb -> rgba), undo alpha pre-multiplication,
                 // and store in big-endian format
                 for (int y = 0; y < sh; ++y) {
-                    ffi.Pointer<ffi.Uint32> row = src.cast<ffi.Uint32>() + srcStride * (y + sy);
+                    final row = ffi.Pointer<ffi.Uint32>.fromAddress(src.address + srcStride * (sy + y));
                     for (int x = 0; x < sw; ++x) {
                         int bx = x * 4;
-                        ffi.Pointer<ffi.Uint32> pixel = row + x + sx;
-                        int a = ffi.Pointer.fromAddress(pixel.address).cast<ffi.Uint8>().value >> 24;
-                        int r = ffi.Pointer.fromAddress(pixel.address).cast<ffi.Uint8>().value >> 16;
-                        int g = ffi.Pointer.fromAddress(pixel.address).cast<ffi.Uint8>().value >> 8;
-                        int b = pixel.cast<ffi.Uint8>().value;
+                        int pixel = (row + sx + x).value;
+                        int a = (pixel >> 24) & 255;
+                        int r = (pixel >> 16) & 255;
+                        int g = (pixel >> 8) & 255;
+                        int b = pixel & 255;
                         dataArray[dst + bx + 3] = a;
 
                         // Performance optimization: fully transparent/opaque pixels can be
@@ -1639,7 +1639,6 @@ class Context2D {
                             dataArray[dst + bx + 1] = (g * alphaR).toInt();
                             dataArray[dst + bx + 2] = (b * alphaR).toInt();
                         }
-
                     }
                     dst += dstStride;
                 }
@@ -1693,7 +1692,7 @@ class Context2D {
                 throw "Invalid pixel format or not an image canvas";
             }
         }
-
+        
         return ImageData(dataArray, sw, sh);
     }
 
