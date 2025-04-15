@@ -1,21 +1,21 @@
+import 'dart:math';
+
 import 'package:dcanvas/dcanvas.dart';
 import 'package:dcanvas/backend/Window.dart' as Window;
 
 typedef Event = Window.Event;
-typedef EventTypes = Window.EventTypes;
+typedef EventType = Window.EventType;
 typedef Key = Window.Key;
 
 var running = true;
 void myEventHandler(Event event) {
-    switch (event.which) {
-        case EventTypes.Quit:
+    if (event.type == EventType.Quit) {
+        running = false;
+    } else if (event.type == EventType.KeyDown) {
+        event = event as Window.KeyboardEvent;
+        if (event.keyCode == Key.Escape) {
             running = false;
-        case EventTypes.KeyDown:
-            if (event.data == Key.Escape) {
-                running = false;
-            }
-        case EventTypes.Unknown:
-
+        }
     }
 }
 

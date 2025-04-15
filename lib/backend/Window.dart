@@ -16,7 +16,9 @@ enum EventType {
     Unknown
 }
 
-class Event {}
+class Event {
+    EventType type = EventType.Unknown;
+}
 
 class MouseEvent extends Event {
     late EventType type;
@@ -48,7 +50,9 @@ class KeyboardEvent extends Event {
     }
 }
 
-class QuitEvent extends Event {}
+class QuitEvent extends Event {
+    EventType type = EventType.Quit;
+}
 
 class Key {
     static final int Escape = 27;
