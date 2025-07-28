@@ -7,6 +7,7 @@
     modules: {
         dcanvas: {
             type: "dart:lib",
+            root: "./",
             dependencies: [
                 "ffi",
                 "build_essential",

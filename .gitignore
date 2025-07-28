@@ -1,5 +1,5 @@
 build
-.dart_tool/
+.dart_tool
 pubspec.lock
 pubspec.yaml
 
