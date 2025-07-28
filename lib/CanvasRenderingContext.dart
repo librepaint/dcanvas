@@ -25,6 +25,10 @@ class ImageData {
     late int width;
     late int height;
     ImageData(this.data, this.width, this.height);
+
+    static ImageData withDimensions(int width, int height) {
+        return ImageData(Uint8List(width * height * 4), width, height);
+    }
 }
 
 sealed class FillInfo {}

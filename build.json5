@@ -1,0 +1,63 @@
+{
+    name: "dcanvas",
+    description: "Cairo backed Canvas implementation in Dart",
+    author: "VExcess <github.com/vexcess>",
+    repository: "https://github.com/librepaint/dcanvas",
+
+    modules: {
+        dcanvas: {
+            type: "dart:lib",
+            dependencies: [
+                "ffi",
+                "build_essential",
+                "sdl2",
+                "cairo2",
+                "pango1",
+            ],
+            dev_dependencies: [
+                {
+                    name: "ffigen",
+                    type: "dart:lib",
+                    version: "^16.0.0"
+                }
+            ]
+        },
+
+        ffi: {
+            type: "dart:lib",
+            version: "^2.0.1"
+        },
+
+        build_essential: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt-get install build-essential",
+            }
+        },
+
+        sdl2: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt-get install libsdl2-dev",
+            }
+        },
+
+        cairo2: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt-get install libcairo2-dev",
+            }
+        },
+        
+        pango1: {
+            type: "system:lib",
+            install: {
+                debian_ubuntu: "sudo apt-get install libpango1.0-dev",
+            }
+        },
+    },
+
+    run: {
+        demo: "dart run demo/demo.dart"
+    }
+}

@@ -33,6 +33,9 @@ void main() {
     window.setCanvas(canvas);
     window.eventHandler = myEventHandler;
 
+    ctx.fillStyle = "white";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     // Set line width
     ctx.lineWidth = 10;
 
