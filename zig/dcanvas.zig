@@ -1,13 +1,10 @@
-// import 'package:dcanvas/CanvasRenderingContext.dart';
+const CSSColor = @import("./CanvasRenderingContext.zig").CSSColor;
 
-// export './Canvas.dart';
-// export './CanvasRenderingContext.dart';
+fn rgba(r: i32, g: i32, b: i32, a: f32) CSSColor {
+    return CSSColor(r, g, b, a);
+}
 
-// CSSColor rgba(num r, num g, num b, num a) {
-//     return CSSColor(r.toInt(), g.toInt(), b.toInt(), a.toDouble());
-// }
-
-// CSSColor rgb(num r, num g, num b) {
-//     return CSSColor(r.toInt(), g.toInt(), b.toInt(), 1.0);
-// }
+fn rgb(r: i32, g: i32, b: i32) CSSColor {
+    return CSSColor(r, g, b, 1.0);
+}
 
